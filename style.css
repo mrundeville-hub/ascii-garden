@@ -1,0 +1,166 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font-family: "Courier New", Courier, monospace;
+}
+
+body {
+  display: grid;
+  place-items: center;
+}
+
+#stage {
+  width: min(100vw, calc(100vh * 16 / 9));
+  max-height: 100vh;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  grid-template-columns: auto minmax(168px, 18%);
+  align-items: center;
+  justify-content: center;
+  gap: clamp(18px, 3vw, 48px);
+  padding: clamp(18px, 3vw, 48px);
+  background: #000;
+}
+
+#viewport {
+  position: relative;
+  height: min(100%, calc((100vw - 220px) * 5 / 4));
+  max-height: 100%;
+  aspect-ratio: 4 / 5;
+  background: #111;
+  overflow: hidden;
+}
+
+#canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #111;
+  image-rendering: pixelated;
+}
+
+#video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 10;
+  background: #000;
+  color: #7ec47e;
+  font-size: clamp(12px, 1.35vw, 17px);
+  transition: opacity 0.5s;
+}
+
+#overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#startBtn,
+#recordBtn {
+  font-family: inherit;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#startBtn {
+  padding: 12px 28px;
+  font-size: 16px;
+  color: #000;
+  background: #7ec47e;
+}
+
+#startBtn:hover {
+  background: #a3e6a3;
+}
+
+#hint {
+  font-size: 13px;
+  color: #5a9e5a;
+  max-width: 320px;
+  text-align: center;
+  margin-top: 4px;
+  line-height: 1.4;
+  padding: 0 16px;
+}
+
+#controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
+  min-width: 154px;
+  color: #5a9e5a;
+}
+
+#recordBtn {
+  min-height: 52px;
+  padding: 14px 20px;
+  background: #1f1f1f;
+  color: #7ec47e;
+  border: 1px solid #345c34;
+  font-size: clamp(15px, 1.5vw, 20px);
+  letter-spacing: 0;
+}
+
+#recordBtn:hover {
+  background: #2a2a2a;
+}
+
+#recordBtn.recording {
+  background: #8f1f1f;
+  color: #fff;
+  border-color: #d14747;
+}
+
+#recordStatus {
+  min-height: 34px;
+  color: #4f8c4f;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  #stage {
+    grid-template-columns: auto 132px;
+    gap: 14px;
+    padding: 14px;
+  }
+
+  #viewport {
+    height: min(100%, calc((100vw - 174px) * 5 / 4));
+  }
+
+  #controls {
+    min-width: 120px;
+  }
+
+  #recordBtn {
+    padding: 12px 10px;
+  }
+}

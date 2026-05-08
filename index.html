@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASCII Garden</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+  <main id="stage">
+    <section id="viewport">
+      <canvas id="canvas"></canvas>
+      <div id="overlay">
+        <div id="loading">Подготовка...</div>
+        <button id="startBtn" style="display:none;">▶ Начать</button>
+        <div id="hint">Соединяй большой и указательный палец, чтобы капала вода и росли цветы 🌱</div>
+        <div id="error" style="display:none; color:#ff6b6b; max-width:340px; text-align:center;"></div>
+      </div>
+    </section>
+    <aside id="controls">
+      <button id="recordBtn" type="button">● REC</button>
+      <div id="recordStatus">запись viewport</div>
+    </aside>
+  </main>
+  <video id="video" autoplay playsinline muted></video>
+  <script type="module" src="script.js"></script>
+</body>
+</html>

@@ -27,6 +27,9 @@ let pinchIndicator = null; // {x, y, life}
 let recorder = null;
 let recordedChunks = [];
 let appStarted = false;
+let pinchStartTime = 0;
+let smoothedThumb = null;
+let smoothedIndex = null;
 
 const ASCII_CHARS = '··...::--==++**##%@';
 const PALETTE = ['#202020','#2d2d2d','#3a3a3a','#4a4a4a','#626262','#7a7a7a','#9a9a9a','#c8c8c8','#eeeeee'];
@@ -74,6 +77,40 @@ function connectSoundOutput(node) {
   if (recordAudioDest) node.connect(recordAudioDest);
 }
 
+function getVideoCrop() {
+  const vRatio = video.videoWidth / video.videoHeight;
+  const cRatio = cols / rows;
+  if (vRatio > cRatio) {
+    const sh = video.videoHeight;
+    const sw = sh * cRatio;
+    return { sx: (video.videoWidth - sw) / 2, sy: 0, sw, sh };
+  }
+
+  const sw = video.videoWidth;
+  const sh = sw / cRatio;
+  return { sx: 0, sy: (video.videoHeight - sh) / 2, sw, sh };
+}
+
+function mapLandmarkToCanvas(point) {
+  const { sx, sy, sw, sh } = getVideoCrop();
+  const px = point.x * video.videoWidth;
+  const py = point.y * video.videoHeight;
+  const nx = Math.min(1, Math.max(0, (px - sx) / sw));
+  const ny = Math.min(1, Math.max(0, (py - sy) / sh));
+  return {
+    x: (1 - nx) * canvas.width,
+    y: ny * canvas.height
+  };
+}
+
+function smoothPoint(previous, current, amount = 0.42) {
+  if (!previous) return current;
+  return {
+    x: previous.x + (current.x - previous.x) * amount,
+    y: previous.y + (current.y - previous.y) * amount
+  };
+}
+
 function startRecording() {
   if (!appStarted) {
     setRecordState(false, 'сначала нажми Начать');
@@ -93,26 +130,28 @@ function startRecording() {
   ]);
   const mimeType = [
     'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-    'video/mp4',
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm'
-  ].find(type => MediaRecorder.isTypeSupported(type)) || '';
-  const extension = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
+    'video/mp4'
+  ].find(type => MediaRecorder.isTypeSupported(type));
 
-  recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  if (!mimeType) {
+    canvasStream.getTracks().forEach(track => track.stop());
+    setRecordState(false, 'MP4 не поддерживается браузером');
+    return;
+  }
+
+  recorder = new MediaRecorder(stream, { mimeType });
   recorder.ondataavailable = (event) => {
     if (event.data && event.data.size > 0) recordedChunks.push(event.data);
   };
   recorder.onstop = () => {
     canvasStream.getTracks().forEach(track => track.stop());
     const blob = new Blob(recordedChunks, { type: mimeType });
-    downloadRecording(blob, extension);
+    downloadRecording(blob, 'mp4');
     recorder = null;
-    setRecordState(false, `сохранено .${extension}`);
+    setRecordState(false, 'сохранено .mp4');
   };
   recorder.start();
-  setRecordState(true, `пишется .${extension} + звук`);
+  setRecordState(true, 'пишется .mp4 + звук');
 }
 
 function stopRecording() {
@@ -131,61 +170,68 @@ function playSpawnSound() {
   if (!audioCtx) return;
   const t = audioCtx.currentTime;
 
-  // High plink like note block
-  const osc1 = audioCtx.createOscillator();
-  const g1 = audioCtx.createGain();
-  osc1.type = 'square';
-  osc1.frequency.setValueAtTime(1000 + Math.random()*400, t);
-  osc1.frequency.exponentialRampToValueAtTime(1600, t + 0.03);
-  g1.gain.setValueAtTime(0.06, t);
-  g1.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-  osc1.connect(g1);
-  connectSoundOutput(g1);
-  osc1.start(t);
-  osc1.stop(t + 0.08);
+  const osc = audioCtx.createOscillator();
+  const tone = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(1180 + Math.random() * 260, t);
+  osc.frequency.exponentialRampToValueAtTime(520 + Math.random() * 90, t + 0.11);
+  tone.gain.setValueAtTime(0.0001, t);
+  tone.gain.exponentialRampToValueAtTime(0.055, t + 0.012);
+  tone.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+  osc.connect(tone);
+  connectSoundOutput(tone);
+  osc.start(t);
+  osc.stop(t + 0.18);
 
-  // Weird detuned echo
-  const osc2 = audioCtx.createOscillator();
-  const g2 = audioCtx.createGain();
-  osc2.type = 'sine';
-  osc2.frequency.setValueAtTime(600, t + 0.015);
-  osc2.frequency.exponentialRampToValueAtTime(300, t + 0.08);
-  g2.gain.setValueAtTime(0.04, t + 0.015);
-  g2.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-  osc2.connect(g2);
-  connectSoundOutput(g2);
-  osc2.start(t + 0.015);
-  osc2.stop(t + 0.14);
+  const bs = Math.floor(audioCtx.sampleRate * 0.035);
+  const buf = audioCtx.createBuffer(1, bs, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < bs; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bs * 0.32));
+  const noise = audioCtx.createBufferSource();
+  const filter = audioCtx.createBiquadFilter();
+  const g = audioCtx.createGain();
+  noise.buffer = buf;
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(1700 + Math.random() * 700, t);
+  filter.Q.setValueAtTime(5, t);
+  g.gain.setValueAtTime(0.025, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+  noise.connect(filter);
+  filter.connect(g);
+  connectSoundOutput(g);
+  noise.start(t);
 }
 
 function playHitSound() {
   if (!audioCtx) return;
   const t = audioCtx.currentTime;
 
-  // Bloop
   const osc = audioCtx.createOscillator();
   const g = audioCtx.createGain();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(300 + Math.random()*150, t);
-  osc.frequency.exponentialRampToValueAtTime(80, t + 0.12);
-  g.gain.setValueAtTime(0.12, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(260 + Math.random()*90, t);
+  osc.frequency.exponentialRampToValueAtTime(95, t + 0.18);
+  g.gain.setValueAtTime(0.09, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
   osc.connect(g);
   connectSoundOutput(g);
   osc.start(t);
-  osc.stop(t + 0.2);
+  osc.stop(t + 0.26);
 
-  // Tiny noise burst for texture
-  const bs = audioCtx.sampleRate * 0.04;
+  const bs = Math.floor(audioCtx.sampleRate * 0.07);
   const buf = audioCtx.createBuffer(1, bs, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
-  for (let i = 0; i < bs; i++) d[i] = (Math.random()*2-1) * Math.exp(-i/(bs*0.25));
+  for (let i = 0; i < bs; i++) d[i] = (Math.random()*2-1) * Math.exp(-i/(bs*0.18));
   const ns = audioCtx.createBufferSource();
   ns.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
   const ng = audioCtx.createGain();
-  ng.gain.setValueAtTime(0.025, t);
-  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
-  ns.connect(ng);
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(1300, t);
+  ng.gain.setValueAtTime(0.04, t);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+  ns.connect(filter);
+  filter.connect(ng);
   connectSoundOutput(ng);
   ns.start(t);
 }
@@ -194,13 +240,24 @@ function playHitSound() {
 
 function spawnDrop(x, y) {
   const now = performance.now();
-  if (now - lastDropTime < 125) return;
+  if (now - lastDropTime < 240) return;
   lastDropTime = now;
+  const variants = [
+    { char: '·', fallChar: '·', vy: 0.16, vx: -0.05, color: '#e7fbff' },
+    { char: '•', fallChar: '•', vy: 0.22, vx: 0.04, color: '#a7eaff' },
+    { char: 'o', fallChar: '°', vy: 0.18, vx: 0.08, color: '#d7f6ff' },
+    { char: '○', fallChar: 'o', vy: 0.2, vx: -0.02, color: '#bcefff' },
+    { char: '●', fallChar: '•', vy: 0.17, vx: 0.03, color: '#eefcff' }
+  ];
+  const variant = variants[Math.floor(Math.random() * variants.length)];
   drops.push({
     x, y,
-    vy: 0.28 + Math.random()*0.24,
-    char: ['·','•','o','░'][Math.floor(Math.random()*4)],
-    color: ['#d7f6ff', '#92dfff', '#eefcff'][Math.floor(Math.random()*3)],
+    vx: variant.vx + (Math.random() * 0.16 - 0.08),
+    vy: variant.vy + Math.random() * 0.16,
+    char: variant.char,
+    fallChar: variant.fallChar,
+    color: variant.color,
+    age: 0,
     life: 1.0
   });
   playSpawnSound();
@@ -212,7 +269,9 @@ function updateDrops() {
   const groundY = (rows - 3) * charH;
   for (let i = drops.length - 1; i >= 0; i--) {
     const d = drops[i];
-    d.vy += 0.35;
+    d.age++;
+    d.vy += 0.18;
+    d.x += d.vx;
     d.y += d.vy;
     if (d.y >= groundY) {
       addMoisture(Math.floor(d.x / charW));
@@ -229,7 +288,8 @@ function updateDrops() {
 function drawDrops() {
   drops.forEach(d => {
     ctx.fillStyle = d.color;
-    ctx.fillText(d.char, d.x, d.y);
+    const char = d.age > 18 ? d.fallChar : d.age > 9 ? '·' : d.char;
+    ctx.fillText(char, d.x, d.y);
   });
   if (pinchIndicator) {
     ctx.fillStyle = `rgba(255,255,255,${pinchIndicator.life})`;
@@ -427,23 +487,31 @@ function processHands() {
   const results = handLandmarker.detectForVideo(video, performance.now());
   if (results.landmarks && results.landmarks.length > 0) {
     const hand = results.landmarks[0];
-    const thumb = hand[4];
-    const index = hand[8];
+    smoothedThumb = smoothPoint(smoothedThumb, mapLandmarkToCanvas(hand[4]));
+    smoothedIndex = smoothPoint(smoothedIndex, mapLandmarkToCanvas(hand[8]));
 
-    const tx = (1 - thumb.x) * cols * charW;
-    const ty = thumb.y * rows * charH;
-    const ix = (1 - index.x) * cols * charW;
-    const iy = index.y * rows * charH;
+    const tx = smoothedThumb.x;
+    const ty = smoothedThumb.y;
+    const ix = smoothedIndex.x;
+    const iy = smoothedIndex.y;
 
-    const dist = Math.hypot((thumb.x - index.x) * cols, (thumb.y - index.y) * rows);
+    const dist = Math.hypot((tx - ix) / charW, (ty - iy) / charH);
 
     drawFingers(tx, ty, ix, iy);
 
-    if (dist < 5.0) {
+    if (dist < 4.2) {
+      const now = performance.now();
+      if (!pinchStartTime) pinchStartTime = now;
       const mx = (tx + ix) / 2;
       const my = (ty + iy) / 2;
-      spawnDrop(mx, my);
+      if (now - pinchStartTime > 420) spawnDrop(mx, my);
+    } else {
+      pinchStartTime = 0;
     }
+  } else {
+    pinchStartTime = 0;
+    smoothedThumb = null;
+    smoothedIndex = null;
   }
 }
 
@@ -488,9 +556,9 @@ async function setupHandLandmarker() {
       },
       runningMode: 'VIDEO',
       numHands: 1,
-      minHandDetectionConfidence: 0.3,
-      minHandPresenceConfidence: 0.3,
-      minTrackingConfidence: 0.3
+      minHandDetectionConfidence: 0.55,
+      minHandPresenceConfidence: 0.55,
+      minTrackingConfidence: 0.5
     });
   } catch (gpuErr) {
     handLandmarker = await HandLandmarker.createFromOptions(wasm, {
@@ -500,9 +568,9 @@ async function setupHandLandmarker() {
       },
       runningMode: 'VIDEO',
       numHands: 1,
-      minHandDetectionConfidence: 0.3,
-      minHandPresenceConfidence: 0.3,
-      minTrackingConfidence: 0.3
+      minHandDetectionConfidence: 0.55,
+      minHandPresenceConfidence: 0.55,
+      minTrackingConfidence: 0.5
     });
   }
 }
